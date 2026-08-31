@@ -1,0 +1,9 @@
+Employee Leave Policy
+
+Annual Leave: 24 days per year.
+Sick Leave: 12 days per year.
+Casual Leave: 6 days per year.
+
+All leave requests must be submitted through the HR portal at least
+3 business days in advance, except for sick leave, which may be
+reported on the day of absence.

@@ -1,0 +1,32 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: plabix-nexus-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-plabix}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-plabix_local_dev}
+      POSTGRES_DB: ${DB_NAME:-plabix_nexus}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - plabix_nexus_pgdata:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-plabix} -d ${DB_NAME:-plabix_nexus}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  plabix_nexus_pgdata:
+    driver: local
+
+# NOTE: Ollama is intentionally NOT containerized here.
+# Install it natively (https://ollama.com/download) and run:
+#   ollama pull llama3.2
+#   ollama pull nomic-embed-text
+#   ollama serve
+# The app talks to it over http://localhost:11434 (see .env.example).
