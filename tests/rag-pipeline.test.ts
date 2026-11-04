@@ -5,6 +5,7 @@ import { rankCandidates } from "@/lib/rag/retrieval";
 import {
   buildContext,
   buildRetrievalQuery,
+  isFollowUpQuestion,
   extractCitations,
   isNotFoundAnswer,
   isUncitedRefusal,
@@ -105,10 +106,13 @@ describe("answer helpers", () => {
       { chunkId: "2", documentId: "b", documentName: "B.txt", content: "beta", similarity: 0.8 },
       { chunkId: "3", documentId: "a", documentName: "A.pdf", content: "alpha two", similarity: 0.7, page: 5 },
     ]);
+    // Page 5's chunk (0.7) is far below the document's best (0.9): it stays in
+    // the context but its page is not cited.
     expect(documents.map((d) => [d.ref, d.documentName, Array.from(d.pages)])).toEqual([
-      [1, "A.pdf", [2, 5]],
+      [1, "A.pdf", [2]],
       [2, "B.txt", []],
     ]);
+    expect(context).toContain("alpha two");
     expect(context).toContain('<source id="1" name="A.pdf" page="2">');
     expect(context).toContain('<source id="2" name="B.txt">');
   });
@@ -157,5 +161,28 @@ describe("answer helpers", () => {
     expect(buildRetrievalQuery("What is the process to request parental leave from HR?", history)).toBe(
       "What is the process to request parental leave from HR?"
     );
+  });
+
+  it("cites every page whose chunk is close to the document's best match", () => {
+    const { documents } = buildContext([
+      { chunkId: "1", documentId: "a", documentName: "A.pdf", content: "one", similarity: 0.82, page: 3 },
+      { chunkId: "2", documentId: "a", documentName: "A.pdf", content: "two", similarity: 0.78, page: 1 },
+      { chunkId: "3", documentId: "a", documentName: "A.pdf", content: "three", similarity: 0.55, page: 7 },
+    ]);
+    expect(Array.from(documents[0]!.pages).sort()).toEqual([1, 3]);
+  });
+
+  it("does not treat short self-contained questions as follow-ups", () => {
+    const history = [
+      { role: "user" as const, content: "What is the hotel reimbursement limit per night?" },
+      { role: "assistant" as const, content: "150 dollars [1]." },
+    ];
+    for (const q of ["What is the capital of France?", "What is the CEO's salary?", "Is there a dress code?"]) {
+      expect(isFollowUpQuestion(q), q).toBe(false);
+      expect(buildRetrievalQuery(q, history)).toBe(q);
+    }
+    for (const q of ["And flights?", "What about meals?", "Does that include breakfast?", "Sick leave?"]) {
+      expect(isFollowUpQuestion(q), q).toBe(true);
+    }
   });
 });

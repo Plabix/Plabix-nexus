@@ -16,9 +16,9 @@ let failures = 0;
 let warnings = 0;
 
 const ok = (msg) => console.log(`  ✔ ${msg}`);
-const warn = (msg) => {
+const warn = (msg, fix) => {
   warnings++;
-  console.log(`  ! ${msg}`);
+  console.log(`  ! ${msg}${fix ? `\n      → ${fix}` : ""}`);
 };
 const fail = (msg, fix) => {
   failures++;
@@ -41,6 +41,14 @@ function checkConfig() {
   if (secret.length < 32 || secret === "replace-this-with-a-long-random-secret") {
     warn("SESSION_SECRET is a placeholder or too short (fine for local dev, refused in production)");
   } else ok("SESSION_SECRET looks strong");
+  const threshold = Number(process.env.RAG_SIMILARITY_THRESHOLD || 0.6);
+  const embedModel = process.env.OLLAMA_EMBEDDING_MODEL || "nomic-embed-text";
+  if (embedModel.startsWith("nomic-embed-text") && threshold < 0.55) {
+    warn(
+      `RAG_SIMILARITY_THRESHOLD=${threshold} is low for nomic-embed-text: unrelated questions may get answers`,
+      "Use 0.6 (calibrated default). Unrelated questions score ~0.40-0.55, relevant ones ~0.65+."
+    );
+  } else ok(`RAG_SIMILARITY_THRESHOLD=${threshold}`);
 }
 
 async function checkDatabase() {

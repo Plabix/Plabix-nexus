@@ -13,3 +13,5 @@ tsconfig.tsbuildinfo
 *.tsbuildinfo
 test-results/
 playwright-report/
+# Local database backups (pg_dump)
+backups/

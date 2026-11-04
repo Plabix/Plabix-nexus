@@ -32,9 +32,10 @@ class Client {
     this.request(path, { method: "POST", body: JSON.stringify(data) });
   del = (path: string) => this.request(path, { method: "DELETE" });
 
-  async upload(fileName: string, content: Buffer | string, type = "") {
+  async upload(fileName: string, content: Uint8Array | string, type = "") {
     const form = new FormData();
-    form.append("file", new Blob([content], { type }), fileName);
+    const part = typeof content === "string" ? content : new Uint8Array(content);
+    form.append("file", new Blob([part], { type }), fileName);
     return this.request("/api/documents", { method: "POST", body: form });
   }
 

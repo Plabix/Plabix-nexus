@@ -42,11 +42,20 @@ Rules you must always follow:
 
 const MAX_HISTORY_MESSAGES = 4;
 
+/**
+ * A page is cited only if one of its chunks scores within this margin of the
+ * document's best chunk. A weakly related chunk from another page can pass
+ * the retrieval threshold and give the model extra context, but citing its
+ * page would point the reader at the wrong place.
+ */
+const PAGE_SIMILARITY_MARGIN = 0.1;
+
 interface ContextDocument {
   ref: number;
   documentId: string;
   documentName: string;
   similarity: number;
+  /** Pages worth citing (see PAGE_SIMILARITY_MARGIN). */
   pages: Set<number>;
   excerpt: string;
 }
@@ -69,6 +78,7 @@ export function buildContext(chunks: RetrievedChunk[]): {
 } {
   const maxChars = Number(process.env.RAG_MAX_CONTEXT_CHARS || 8000);
   const documents = new Map<string, ContextDocument>();
+  const pageSimilarity = new Map<string, Map<number, number>>();
   const blocks: string[] = [];
   let used = 0;
 
@@ -95,9 +105,19 @@ export function buildContext(chunks: RetrievedChunk[]): {
       doc.similarity = chunk.similarity;
       doc.excerpt = chunk.content.slice(0, 280);
     }
-    if (chunk.page) doc.pages.add(chunk.page);
+    if (chunk.page) {
+      const pages = pageSimilarity.get(chunk.documentId) ?? new Map<number, number>();
+      pages.set(chunk.page, Math.max(pages.get(chunk.page) ?? 0, chunk.similarity));
+      pageSimilarity.set(chunk.documentId, pages);
+    }
     blocks.push(block);
     used += block.length;
+  }
+
+  for (const doc of documents.values()) {
+    for (const [page, similarity] of pageSimilarity.get(doc.documentId) ?? []) {
+      if (similarity >= doc.similarity - PAGE_SIMILARITY_MARGIN) doc.pages.add(page);
+    }
   }
 
   return { context: blocks.join("\n\n"), documents: Array.from(documents.values()) };
@@ -149,14 +169,29 @@ export function removeInvalidCitations(answer: string, validRefs: Set<number>): 
     .trim();
 }
 
+const FOLLOW_UP_START = /^(and|also|or|but|then|same|what about|how about|and what about)\b/i;
+const REFERRING_WORD = /\b(it|its|that|this|those|these|they|them|their)\b/i;
+
 /**
- * For short follow-ups ("and sick leave?"), retrieval works better when the
+ * True when a question only makes sense with the previous one, e.g.
+ * "And sick leave?" or "How long is it?". Self-contained short questions
+ * ("What is the capital of France?") are NOT follow-ups: merging them with
+ * the previous question would retrieve the previous topic's documents and
+ * the model would answer the wrong question.
+ */
+export function isFollowUpQuestion(question: string): boolean {
+  const text = question.trim();
+  const wordCount = text.split(/\s+/).filter(Boolean).length;
+  return wordCount <= 3 || FOLLOW_UP_START.test(text) || (wordCount <= 8 && REFERRING_WORD.test(text));
+}
+
+/**
+ * For follow-ups ("and sick leave?"), retrieval works better when the
  * previous question is included in the search text.
  */
 export function buildRetrievalQuery(question: string, history: ChatMessage[]): string {
   const previousQuestion = [...history].reverse().find((m) => m.role === "user")?.content;
-  const wordCount = question.trim().split(/\s+/).length;
-  return previousQuestion && wordCount <= 6 ? `${previousQuestion}\n${question}` : question;
+  return previousQuestion && isFollowUpQuestion(question) ? `${previousQuestion}\n${question}` : question;
 }
 
 /**
