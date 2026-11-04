@@ -24,7 +24,12 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 -- ── Memberships (many-to-many users <-> organizations, with role) ────────
-CREATE TYPE membership_role AS ENUM ('owner', 'admin', 'member');
+-- Enum creation is wrapped so this file is safe to re-run against a database
+-- that docker-entrypoint-initdb.d already initialized.
+DO $$ BEGIN
+  CREATE TYPE membership_role AS ENUM ('owner', 'admin', 'member');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS memberships (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -51,7 +56,10 @@ CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 
 -- ── Documents ────────────────────────────────────────────────────────────
-CREATE TYPE document_status AS ENUM ('pending', 'processing', 'ready', 'failed');
+DO $$ BEGIN
+  CREATE TYPE document_status AS ENUM ('pending', 'processing', 'ready', 'failed');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS documents (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -109,7 +117,10 @@ CREATE INDEX IF NOT EXISTS idx_conversations_org ON conversations(organization_i
 CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id);
 
 -- ── Messages ─────────────────────────────────────────────────────────────
-CREATE TYPE message_role AS ENUM ('user', 'assistant', 'system');
+DO $$ BEGIN
+  CREATE TYPE message_role AS ENUM ('user', 'assistant', 'system');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS messages (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

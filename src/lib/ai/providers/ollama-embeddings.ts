@@ -1,65 +1,98 @@
-import type { EmbeddingProvider, EmbeddingResult } from "../types";
+import type { EmbeddingProvider, EmbeddingPurpose, EmbeddingResult } from "../types";
 import { AIProviderError } from "../types";
+import { ollamaPost } from "./ollama-http";
 
 interface OllamaEmbeddingConfig {
   baseUrl: string;
   model: string;
   dimensions: number;
+  timeoutMs: number;
+  batchSize: number;
+  queryPrefix: string;
+  documentPrefix: string;
+  keepAlive: string;
+}
+
+/**
+ * Throws unless `vector` is a non-empty array of finite numbers with the
+ * expected length. Storing a wrong-sized or NaN vector would either fail the
+ * insert or silently poison similarity search.
+ */
+export function assertValidEmbedding(vector: unknown, expectedDimensions: number): number[] {
+  if (!Array.isArray(vector) || vector.length === 0) {
+    throw new AIProviderError("The embedding model returned an empty embedding.", "ollama");
+  }
+  if (vector.length !== expectedDimensions) {
+    throw new AIProviderError(
+      `Embedding has ${vector.length} dimensions but the database expects ${expectedDimensions}. ` +
+        "Check OLLAMA_EMBEDDING_MODEL and OLLAMA_EMBEDDING_DIMENSIONS.",
+      "ollama"
+    );
+  }
+  if (!vector.every((v) => typeof v === "number" && Number.isFinite(v))) {
+    throw new AIProviderError("The embedding model returned invalid values.", "ollama");
+  }
+  if (vector.every((v) => v === 0)) {
+    throw new AIProviderError("The embedding model returned an all-zero vector.", "ollama");
+  }
+  return vector as number[];
 }
 
 /** EmbeddingProvider backed by a local Ollama instance (e.g. nomic-embed-text). */
 export class OllamaEmbeddingProvider implements EmbeddingProvider {
   readonly name = "ollama";
+  readonly model: string;
   readonly dimensions: number;
-  private readonly baseUrl: string;
-  private readonly model: string;
+  private readonly config: OllamaEmbeddingConfig;
 
   constructor(config: OllamaEmbeddingConfig) {
-    this.baseUrl = config.baseUrl.replace(/\/$/, "");
+    this.config = { ...config, baseUrl: config.baseUrl.replace(/\/$/, "") };
     this.model = config.model;
     this.dimensions = config.dimensions;
   }
 
-  async embed(text: string): Promise<EmbeddingResult> {
-    const start = Date.now();
-    let response: Response;
-    try {
-      response = await fetch(`${this.baseUrl}/api/embeddings`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: this.model, prompt: text }),
-      });
-    } catch (err) {
-      throw new AIProviderError(
-        "Local AI service is unavailable. Start Ollama and try again.",
-        this.name,
-        err
-      );
-    }
-
-    if (!response.ok) {
-      const errText = await response.text().catch(() => "");
-      throw new AIProviderError(
-        `Ollama embedding request failed (${response.status}): ${errText || "unknown error"}`,
-        this.name
-      );
-    }
-
-    const data = (await response.json()) as { embedding?: number[] };
-    if (!data.embedding || data.embedding.length === 0) {
-      throw new AIProviderError("Ollama returned an empty embedding.", this.name);
-    }
-
-    return { embedding: data.embedding, model: this.model, latencyMs: Date.now() - start };
+  async embed(text: string, purpose: EmbeddingPurpose = "query"): Promise<EmbeddingResult> {
+    const [result] = await this.embedBatch([text], purpose);
+    return result!;
   }
 
-  async embedBatch(texts: string[]): Promise<EmbeddingResult[]> {
-    // Ollama's /api/embeddings endpoint is single-text; batch sequentially.
-    // Kept as its own method so a future provider (e.g. one with native batch
-    // support) can override this without changing call sites.
+  async embedBatch(
+    texts: string[],
+    purpose: EmbeddingPurpose = "document"
+  ): Promise<EmbeddingResult[]> {
+    const prefix = purpose === "query" ? this.config.queryPrefix : this.config.documentPrefix;
     const results: EmbeddingResult[] = [];
-    for (const text of texts) {
-      results.push(await this.embed(text));
+
+    // /api/embed accepts an array input; send bounded batches so one huge
+    // document cannot produce a single request that exceeds the timeout.
+    for (let i = 0; i < texts.length; i += this.config.batchSize) {
+      const batch = texts.slice(i, i + this.config.batchSize);
+      const start = Date.now();
+      const data = await ollamaPost<{ embeddings?: unknown[] }>(
+        `${this.config.baseUrl}/api/embed`,
+        {
+          model: this.model,
+          input: batch.map((t) => prefix + t),
+          truncate: true,
+          keep_alive: this.config.keepAlive,
+        },
+        { timeoutMs: this.config.timeoutMs, retries: 2 }
+      );
+
+      if (!Array.isArray(data.embeddings) || data.embeddings.length !== batch.length) {
+        throw new AIProviderError(
+          "The embedding model returned an unexpected number of embeddings.",
+          this.name
+        );
+      }
+      const latencyMs = Date.now() - start;
+      for (const vector of data.embeddings) {
+        results.push({
+          embedding: assertValidEmbedding(vector, this.dimensions),
+          model: this.model,
+          latencyMs,
+        });
+      }
     }
     return results;
   }

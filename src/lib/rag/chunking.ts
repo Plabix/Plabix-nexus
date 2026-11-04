@@ -3,6 +3,32 @@ export interface Chunk {
   content: string;
 }
 
+export interface DocumentChunk extends Chunk {
+  page?: number;
+}
+
+/**
+ * Chunks each section separately so a chunk never spans two PDF pages (which
+ * keeps page citations exact), then drops exact-duplicate chunks such as
+ * repeated headers and footers. Indices are renumbered sequentially.
+ */
+export function chunkSections(
+  sections: { text: string; page?: number }[],
+  options: { chunkSize?: number; overlap?: number } = {}
+): DocumentChunk[] {
+  const seen = new Set<string>();
+  const result: DocumentChunk[] = [];
+  for (const section of sections) {
+    for (const chunk of chunkText(section.text, options)) {
+      const key = chunk.content.replace(/\s+/g, " ").toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push({ index: result.length, content: chunk.content, page: section.page });
+    }
+  }
+  return result;
+}
+
 /**
  * Splits cleaned text into overlapping chunks by character count.
  * Character-based (not token-based) to avoid pulling in a tokenizer

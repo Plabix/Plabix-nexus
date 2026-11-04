@@ -1,22 +1,26 @@
 import { NextResponse } from "next/server";
-import { getCurrentUser, getCurrentOrganizationId } from "@/lib/auth/session";
+import { getCurrentUser, getCurrentMembership } from "@/lib/auth/session";
 import { queryOne } from "@/lib/db/pool";
+import { withErrorHandling } from "@/lib/auth/guard";
 
-export async function GET() {
+export const GET = withErrorHandling(async () => {
   const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ user: null }, { status: 200 });
   }
-  const organizationId = await getCurrentOrganizationId(user.id);
-  const org = organizationId
+  const membership = await getCurrentMembership(user.id);
+  const org = membership
     ? await queryOne<{ name: string; slug: string }>(
         "SELECT name, slug FROM organizations WHERE id = $1",
-        [organizationId]
+        [membership.organizationId]
       )
     : null;
 
   return NextResponse.json({
     user: { id: user.id, email: user.email, fullName: user.fullName },
-    organization: org ? { id: organizationId, name: org.name, slug: org.slug } : null,
+    organization:
+      org && membership
+        ? { id: membership.organizationId, name: org.name, slug: org.slug, role: membership.role }
+        : null,
   });
-}
+});

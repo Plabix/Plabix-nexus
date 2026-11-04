@@ -6,10 +6,12 @@ import { createConversationSchema } from "@/lib/validation";
 export const GET = withErrorHandling(async () => {
   const { organizationId, userId } = await requireAuth();
   const conversations = await query(
-    `SELECT id, title, created_at, updated_at
-     FROM conversations
-     WHERE organization_id = $1 AND user_id = $2
-     ORDER BY updated_at DESC`,
+    `SELECT c.id, c.title, c.created_at, c.updated_at,
+            (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id)::int AS message_count
+     FROM conversations c
+     WHERE c.organization_id = $1 AND c.user_id = $2
+     ORDER BY c.updated_at DESC
+     LIMIT 200`,
     [organizationId, userId]
   );
   return NextResponse.json({ conversations });

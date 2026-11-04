@@ -1,4 +1,10 @@
+import dns from "node:dns";
 import { Pool, type QueryResultRow } from "pg";
+
+// Resolve "localhost" to 127.0.0.1 before ::1. Docker Desktop on Windows
+// accepts IPv6 loopback connections and then resets them, which surfaces
+// as random ECONNRESET errors when DATABASE_URL uses "localhost".
+dns.setDefaultResultOrder("ipv4first");
 
 let pool: Pool | null = null;
 

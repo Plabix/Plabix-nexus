@@ -29,7 +29,6 @@ export async function logAIUsage(input: LogAIUsageInput): Promise<void> {
     );
   } catch (err) {
     // Observability must never break the request path.
-    // eslint-disable-next-line no-console
     console.error("Failed to log AI usage event:", err);
   }
 }

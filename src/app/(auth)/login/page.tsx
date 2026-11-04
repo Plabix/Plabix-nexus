@@ -35,7 +35,7 @@ export default function LoginPage() {
         </div>
 
         {error && (
-          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
+          <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
         )}
 
         <div className="space-y-3">
@@ -43,6 +43,8 @@ export default function LoginPage() {
             className="input"
             type="email"
             placeholder="Email"
+            aria-label="Email"
+            autoComplete="email"
             required
             value={form.email}
             onChange={(e) => setForm({ ...form, email: e.target.value })}
@@ -51,6 +53,8 @@ export default function LoginPage() {
             className="input"
             type="password"
             placeholder="Password"
+            aria-label="Password"
+            autoComplete="current-password"
             required
             value={form.password}
             onChange={(e) => setForm({ ...form, password: e.target.value })}

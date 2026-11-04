@@ -1,36 +1,40 @@
 import { NextResponse } from "next/server";
 import { getPool } from "@/lib/db/pool";
-import { loadAIConfig } from "@/lib/ai/config";
+import { checkAIHealth } from "@/lib/ai/provider";
+import { queueStats } from "@/lib/rag/queue";
 
-/** System health check: DB connectivity + Ollama reachability. No auth required. */
+/**
+ * System health: database, pgvector, Ollama and required models.
+ * Public (used by uptime checks), so it reports status only — no data.
+ */
 export async function GET() {
-  const config = loadAIConfig();
-  const status: {
-    database: "ok" | "error";
-    ollama: "ok" | "error" | "unknown";
-    timestamp: string;
-  } = {
-    database: "error",
-    ollama: "unknown",
+  let database: "ok" | "error" = "error";
+  let vector: "ok" | "missing" | "unknown" = "unknown";
+  try {
+    const result = await getPool().query<{ installed: boolean }>(
+      "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') AS installed"
+    );
+    database = "ok";
+    vector = result.rows[0]?.installed ? "ok" : "missing";
+  } catch {
+    database = "error";
+  }
+
+  const ai = await checkAIHealth();
+  const modelsReady = ai.reachable && ai.models.every((m) => m.available);
+
+  const status = {
+    status: database === "ok" && vector === "ok" && modelsReady ? "ok" : "degraded",
+    database,
+    vector,
+    ollama: ai.reachable ? "ok" : "error",
+    models: ai.models,
+    ingestion: queueStats(),
     timestamp: new Date().toISOString(),
   };
 
-  try {
-    await getPool().query("SELECT 1");
-    status.database = "ok";
-  } catch {
-    status.database = "error";
-  }
-
-  try {
-    const res = await fetch(`${config.ollama.baseUrl}/api/tags`, {
-      signal: AbortSignal.timeout(3000),
-    });
-    status.ollama = res.ok ? "ok" : "error";
-  } catch {
-    status.ollama = "error";
-  }
-
-  const httpStatus = status.database === "ok" ? 200 : 503;
-  return NextResponse.json(status, { status: httpStatus });
+  return NextResponse.json(status, {
+    status: database === "ok" ? 200 : 503,
+    headers: { "Cache-Control": "no-store" },
+  });
 }

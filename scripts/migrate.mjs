@@ -3,7 +3,11 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import dns from "node:dns";
 import pg from "pg";
+
+// Docker Desktop on Windows resets IPv6 loopback (::1) connections; prefer IPv4.
+dns.setDefaultResultOrder("ipv4first");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const migrationsDir = path.join(__dirname, "..", "migrations");

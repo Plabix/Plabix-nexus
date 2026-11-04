@@ -1,19 +1,27 @@
-// Creates a demo organization + user and ingests the sample leave-policy
+// Creates a demo organization + user and registers the sample leave-policy
 // document so you can immediately test the RAG flow end to end.
 //
-// Usage: npm run db:seed
-// Requires: migrations already applied, Ollama running with both models pulled.
+// Usage: npm run db:seed   (loads .env.local automatically)
+// Requires: migrations already applied. The running app's background worker
+// then extracts, chunks and embeds the document (Ollama must be running).
 import { readFileSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import dns from "node:dns";
 import pg from "pg";
 import bcrypt from "bcryptjs";
+
+// Docker Desktop on Windows resets IPv6 loopback (::1) connections; prefer IPv4.
+dns.setDefaultResultOrder("ipv4first");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const DEMO_EMAIL = "demo@plabix.local";
 const DEMO_PASSWORD = "demopassword123";
 const DEMO_ORG_NAME = "Plabix Demo Co";
+const FILE_NAME = "employee-leave-policy.txt";
 
 async function main() {
   const connectionString = process.env.DATABASE_URL;
@@ -39,6 +47,7 @@ async function main() {
     orgId = membership.rows[0].organization_id;
   } else {
     const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 12);
+    await client.query("BEGIN");
     const userResult = await client.query(
       "INSERT INTO users (email, password_hash, full_name) VALUES ($1, $2, $3) RETURNING id",
       [DEMO_EMAIL, passwordHash, "Demo User"]
@@ -55,46 +64,46 @@ async function main() {
       "INSERT INTO memberships (user_id, organization_id, role) VALUES ($1, $2, 'owner')",
       [userId, orgId]
     );
-    console.log(`Created demo user: ${DEMO_EMAIL} / ${DEMO_PASSWORD}`);
+    await client.query("COMMIT");
+    console.log(`Created demo user: ${DEMO_EMAIL}`);
   }
 
-  // Register the sample document as 'pending' — the running app's ingestion
-  // pipeline (via /api/documents) is what actually chunks + embeds it, since
-  // that requires a live Ollama instance which this script does not assume.
-  const fixturePath = path.join(__dirname, "..", "tests", "fixtures", "employee-leave-policy.txt");
-  const content = readFileSync(fixturePath);
-
   const docExists = await client.query(
-    "SELECT id FROM documents WHERE organization_id = $1 AND file_name = $2",
-    [orgId, "employee-leave-policy.txt"]
+    "SELECT id, status FROM documents WHERE organization_id = $1 AND file_name = $2",
+    [orgId, FILE_NAME]
   );
 
   if (docExists.rows.length === 0) {
-    const storagePath = path.join(__dirname, "..", "storage", "seed", "employee-leave-policy.txt");
-    const { mkdir, writeFile } = await import("node:fs/promises");
-    await mkdir(path.dirname(storagePath), { recursive: true });
-    await writeFile(storagePath, content);
+    const content = readFileSync(path.join(__dirname, "..", "tests", "fixtures", FILE_NAME));
+    // Same layout as the app's local storage provider: <UPLOAD_DIR>/<org>/<file>,
+    // with the key stored relative to UPLOAD_DIR.
+    const uploadDir = path.resolve(process.env.UPLOAD_DIR || "./storage/documents");
+    const key = `${orgId}/seed-${FILE_NAME}`;
+    await mkdir(path.join(uploadDir, orgId), { recursive: true });
+    await writeFile(path.join(uploadDir, key), content);
 
     await client.query(
-      `INSERT INTO documents (organization_id, uploaded_by, file_name, file_type, file_size_bytes, storage_path, status)
-       VALUES ($1, $2, $3, $4, $5, $6, 'pending')`,
-      [orgId, userId, "employee-leave-policy.txt", "text/plain", content.length, storagePath]
+      `INSERT INTO documents
+         (organization_id, uploaded_by, file_name, file_type, file_size_bytes, storage_path,
+          status, content_sha256)
+       VALUES ($1, $2, $3, 'text/plain', $4, $5, 'pending', $6)`,
+      [orgId, userId, FILE_NAME, content.length, key, createHash("sha256").update(content).digest("hex")]
     );
-    console.log(
-      "Seeded sample document as 'pending'. Log in and it will process automatically " +
-        "(or trigger it via the Documents page / retry) once Ollama is running."
-    );
+    console.log("Seeded sample document as 'pending'.");
   } else {
-    console.log("Sample document already seeded.");
+    console.log(`Sample document already seeded (status: ${docExists.rows[0].status}).`);
   }
 
   await client.end();
-  console.log("\nSeed complete. Log in with:");
+  console.log(
+    "\nSeed complete. Start the app (npm run dev): its background worker indexes pending\n" +
+      "documents automatically once Ollama is running.\n"
+  );
   console.log(`  email:    ${DEMO_EMAIL}`);
   console.log(`  password: ${DEMO_PASSWORD}`);
 }
 
 main().catch((err) => {
-  console.error(err);
+  console.error(err.message ?? err);
   process.exit(1);
 });

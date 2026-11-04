@@ -6,3 +6,10 @@ node_modules
 dist
 coverage
 .DS_Store
+# Uploaded documents and other user data — never commit
+storage/
+# Build artifacts
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+test-results/
+playwright-report/
