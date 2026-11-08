@@ -2,6 +2,7 @@ import type { ChatProvider, EmbeddingProvider, ProviderHealth } from "./types";
 import { loadAIConfig } from "./config";
 import { OllamaChatProvider } from "./providers/ollama-chat";
 import { OllamaEmbeddingProvider } from "./providers/ollama-embeddings";
+import { ollamaGatewayHeaders } from "./providers/ollama-http";
 
 /**
  * Single point of truth for "which AI provider are we using".
@@ -60,7 +61,10 @@ export async function checkAIHealth(): Promise<ProviderHealth> {
     { name: ollama.embeddingModel, role: "embedding" as const },
   ];
   try {
-    const res = await fetch(`${ollama.baseUrl}/api/tags`, { signal: AbortSignal.timeout(3000) });
+    const res = await fetch(`${ollama.baseUrl}/api/tags`, {
+      headers: ollamaGatewayHeaders(),
+      signal: AbortSignal.timeout(3000),
+    });
     if (!res.ok) {
       return {
         reachable: false,

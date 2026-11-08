@@ -8,6 +8,15 @@ export interface OllamaRequestOptions {
   retries?: number;
 }
 
+/**
+ * Auth header for a protected gateway (e.g. Cloudflare Tunnel) in front of Ollama.
+ * Server-side only; empty when OLLAMA_GATEWAY_TOKEN is not set (plain local Ollama).
+ */
+export function ollamaGatewayHeaders(): Record<string, string> {
+  const token = process.env.OLLAMA_GATEWAY_TOKEN?.trim();
+  return token ? { "x-ollama-gateway-token": token } : {};
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -30,7 +39,7 @@ export async function ollamaPost<T>(
     try {
       response = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...ollamaGatewayHeaders() },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(timeoutMs),
       });
